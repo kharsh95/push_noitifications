@@ -55,16 +55,13 @@ def check_and_send_notifications() -> None:
         .where("epoch_time", "<=", current_time)\
         .where("notificationSent", "==", False).stream()
 
-    # Process each document in the query
     for doc in query:
         data = doc.to_dict()
         message = data.get("message")
         scheduled_time = datetime.fromtimestamp(data.get("epoch_time"))
 
-        # Send push notification
         send_push_notification(message, scheduled_time)
 
-        # Update the document to mark the notification as sent
         doc.reference.update({
             "notificationSent": True
         })
