@@ -1,45 +1,74 @@
 import firebase_admin
 from firebase_admin import credentials, firestore, messaging
 from datetime import datetime
+from firebase_functions import scheduler_fn
 
 cred = credentials.Certificate("key.json")
 firebase_admin.initialize_app(cred)
+
 db = firestore.client()
 
-def send_push_notification(message):
-        fcm_token = "f88Y6lKNQ8-lwkAFNWon1j:APA91bHlPt_89lBzJAflRNTIYsuhHKWmZUZ7Le8DnBvsEUKF5VDVQx3tP0MiUmWbBsLNNgjNSbSKB7cEH4fzqWMg3-7N__iRXgRl1MLdm7Gp_g3wPzmIQky5pyJ7mLp2rats3jKY3bR2"
+def send_push_notification(message, time):
+    fcm_token = "f88Y6lKNQ8-lwkAFNWon1j:APA91bHlPt_89lBzJAflRNTIYsuhHKWmZUZ7Le8DnBvsEUKF5VDVQx3tP0MiUmWbBsLNNgjNSbSKB7cEH4fzqWMg3-7N__iRXgRl1MLdm7Gp_g3wPzmIQky5pyJ7mLp2rats3jKY3bR2"
+    
+    notification_message = messaging.Message(
+        notification=messaging.Notification(
+            title=str(time),
+            body=message,
+        ),
+        token=fcm_token,
+    )
 
-        message = messaging.Message(
-            notification=messaging.Notification(
-                title='Scheduled Event',
-                body=message,
-            ),
-            token=fcm_token,
-        )
+    res = messaging.send(notification_message)
+    print(f"Successfully sent notification: {res}")
 
-        res = messaging.send(message)
-        print(f"Successfully sent notification: {res}")
+def input_message():
+    message = input("Enter the message to be sent: ")
+    time = input("Enter time at which notification is to be sent (epoch time): ")
 
+    try:
+        epoch_time = int(time)
+    except ValueError:
+        print("Invalid epoch time entered.")
+        return
 
-# Function to check for events and send notifications
-# def check_and_send_notifications():
-#     # Get current time in ISO format
-#     now = datetime.utcnow().isoformat() + 'Z'
+    local_time = datetime.fromtimestamp(epoch_time)
+    epoch_now = int(datetime.now().timestamp())
+    print(f"Time difference (seconds): {epoch_time - epoch_now}")
 
-#     # Query Firestore for events scheduled before or at current time
-#     scheduled_events = db.collection("scheduled_events").where('events.schedulced_time', '<=', now).get()
+    event_data = {
+        "epoch_time": epoch_time,
+        "time": local_time,
+        "message": message,
+        "notificationSent": False
+    }
 
-#     for doc in scheduled_events:
-#         event_data = doc.to_dict()
-#         user_id = event_data["user_id"]
+    db.collection("scheduled_events").add(event_data)
+    print(f"Notification scheduled for: {local_time}")
 
-#         # Send notifications for each event
-#         for event in event_data["events"]:
-#             send_push_notification(event["message"])
+@scheduler_fn.on_schedule(schedule="* * * * *") 
+def check_and_send_notifications() -> None:
+    print("Scheduler function triggered")
 
-#         # Optionally: Remove the event document after sending notification
-#         db.collection("scheduled_events").document(doc.id).delete()
+    current_time = int(datetime.now().timestamp())
+    query = db.collection("scheduled_events")\
+        .where("epoch_time", "<=", current_time)\
+        .where("notificationSent", "==", False).stream()
 
-# # Call the function to check and send notifications
-# check_and_send_notifications()
-send_push_notification("E1")
+    # Process each document in the query
+    for doc in query:
+        data = doc.to_dict()
+        message = data.get("message")
+        scheduled_time = datetime.fromtimestamp(data.get("epoch_time"))
+
+        # Send push notification
+        send_push_notification(message, scheduled_time)
+
+        # Update the document to mark the notification as sent
+        doc.reference.update({
+            "notificationSent": True
+        })
+
+    print("Checked for notifications to send.")
+
+input_message()
